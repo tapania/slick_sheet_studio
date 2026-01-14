@@ -50,12 +50,21 @@ agent ui-builder:
     Always run @code-simplifier after writing code.
     Run cargo fmt and cargo clippy before finishing.
 
+agent browser-tester:
+  model: opus
+  prompt: |
+    You are a browser automation testing specialist.
+    You use @dev-browser to verify PWA behavior, offline mode,
+    file operations, and service worker functionality.
+    Always run @code-simplifier after writing code.
+
 agent verifier:
   model: opus
   prompt: |
     You are a strict build and test verifier.
     You ensure all tests pass, clippy has zero warnings,
     code is formatted, and offline mode works correctly.
+    Use @dev-browser for browser verification.
     Loop until ALL requirements are satisfied.
 
 # =============================================================================
@@ -77,6 +86,28 @@ block lint-pass:
     prompt: "Run cargo fmt --check, fix any formatting issues"
   session: current-agent
     prompt: "Run cargo clippy -- -D warnings, fix all warnings"
+
+block browser-test:
+  session: browser-tester
+    prompt: |
+      Use @dev-browser to test the running application:
+      1. Navigate to http://localhost:8080
+      2. Wait for WASM to load
+      3. Verify page elements are present
+      4. Take screenshot for verification
+  session: browser-tester
+    prompt: "Perform interaction tests and validate results"
+
+block pwa-test:
+  session: browser-tester
+    prompt: |
+      Use @dev-browser to test PWA functionality:
+      1. Check service worker registration
+      2. Verify caching behavior
+      3. Test offline mode
+      4. Verify PWA installability
+  session: browser-tester
+    prompt: "Take screenshots and validate PWA requirements"
 
 # =============================================================================
 # Phase 5 Workflow
@@ -313,13 +344,134 @@ let offline-ui = do:
 
   do lint-pass
 
-# Step 8: Final Verification
+# Step 8: Browser Testing - File Operations
+let browser-file-tests = do:
+  session browser-tester:
+    prompt: |
+      Start trunk serve in background, then use @dev-browser to test:
+
+      File Operation Test Scenarios:
+      1. Navigate to http://localhost:8080
+      2. Create a new document (type in editor)
+      3. Verify unsaved changes indicator (*) appears
+      4. Click Save button
+      5. Verify file picker dialog appears (or download starts)
+      6. Save file as "test-project.json"
+      7. Verify unsaved indicator disappears
+      8. Make changes to document
+      9. Use Cmd+S keyboard shortcut
+      10. Verify save works
+      11. Click New button
+      12. Verify confirm dialog appears (unsaved changes)
+      13. Cancel, then Save, then New
+      14. Click Open button
+      15. Load the "test-project.json"
+      16. Verify document state restored
+      17. Take screenshots at each step
+
+      Use @dev-browser for all browser interactions.
+      Loop until all file operation tests pass.
+
+  do browser-test
+
+# Step 9: Browser Testing - PDF Export
+let browser-pdf-tests = do:
+  session browser-tester:
+    prompt: |
+      Use @dev-browser to test PDF export:
+
+      PDF Export Test Scenarios:
+      1. Navigate to http://localhost:8080
+      2. Create or load a document
+      3. Click Export PDF button
+      4. Verify download starts
+      5. Check downloaded file is valid PDF
+      6. Take screenshot of export process
+
+      Use @dev-browser for all browser interactions.
+      Loop until PDF export tests pass.
+
+  do browser-test
+
+# Step 10: Browser Testing - PWA & Offline
+let browser-pwa-tests = do:
+  session browser-tester:
+    prompt: |
+      Use @dev-browser to test PWA and offline functionality:
+
+      PWA Test Scenarios:
+      1. Navigate to http://localhost:8080
+      2. Open DevTools → Application → Service Workers
+      3. Verify service worker is registered and active
+      4. Check cached resources in Cache Storage
+      5. Verify manifest.json is detected
+      6. Check PWA install prompt availability
+      7. Take screenshot of service worker status
+
+      Offline Test Scenarios:
+      1. With app loaded, go to DevTools → Network
+      2. Enable "Offline" mode
+      3. Refresh the page
+      4. Verify app loads from cache
+      5. Verify offline indicator appears
+      6. Verify AI chat shows "unavailable offline"
+      7. Try to type in editor - should work
+      8. Try to send AI prompt - should show offline error
+      9. Disable "Offline" mode
+      10. Verify online status restored
+      11. Verify AI features re-enabled
+      12. Take screenshots of offline and online states
+
+      Font Caching Test:
+      1. Clear IndexedDB
+      2. Reload app
+      3. Verify embedded fonts work immediately
+      4. Request additional font
+      5. Verify font loads and caches
+      6. Go offline
+      7. Verify cached font still works
+
+      Use @dev-browser for all browser interactions.
+      Loop until all PWA and offline tests pass.
+
+  do pwa-test
+
+# Step 11: Full End-to-End Test
+let e2e-test = do:
+  session browser-tester:
+    prompt: |
+      Use @dev-browser for complete end-to-end workflow test:
+
+      Full Workflow:
+      1. Navigate to http://localhost:8080
+      2. Click New → Select template from gallery
+      3. Edit content in editor
+      4. Use AI to modify layout (if online and API key set)
+      5. Add an image via drag-drop
+      6. Save project as JSON
+      7. Export as PDF
+      8. Close and reopen browser
+      9. Load saved project
+      10. Verify all state restored correctly
+      11. Go offline
+      12. Make edits
+      13. Save project (should work offline)
+      14. Go online
+      15. Use AI features again
+      16. Take final screenshot
+
+      This is the complete user journey test.
+      Loop until full workflow passes.
+
+  do browser-test
+
+# Step 12: Final Verification
 do:
   session verifier:
     prompt: |
       Verify Phase 5 is COMPLETE:
 
-      Checklist:
+      Automated Checks:
       [ ] cargo fmt --check passes
       [ ] cargo clippy -- -D warnings passes
       [ ] cargo test passes (all tests green)
@@ -327,24 +479,28 @@ do:
       [ ] File save/load tests pass
       [ ] PDF export tests pass
       [ ] trunk build --release succeeds
-      [ ] Service worker registered
-      [ ] App works offline (except AI)
-      [ ] Save project works (File System Access or download)
-      [ ] Load project restores state
-      [ ] PDF export downloads file
-      [ ] Fonts load (embedded + async)
-      [ ] PWA installable
-      [ ] Offline indicator shows correctly
 
-      Manual verification:
-      1. Open app, create document
-      2. Save as .json
-      3. Close browser, reopen
-      4. Load .json - state restored
-      5. Export PDF - file downloads
-      6. Go offline (DevTools)
-      7. App still works, AI shows disabled
-      8. Go online - AI re-enabled
+      Browser Verification (use @dev-browser):
+      [ ] Navigate to http://localhost:8080
+      [ ] Service worker registered and active
+      [ ] Manifest.json detected
+      [ ] PWA installable
+      [ ] Save project works (FSA or download)
+      [ ] Load project restores state
+      [ ] Save As creates new file
+      [ ] Keyboard shortcuts work (Cmd+S, Cmd+O)
+      [ ] Unsaved changes indicator works
+      [ ] PDF export downloads valid file
+      [ ] Fonts load (embedded + async cached)
+      [ ] Offline indicator shows when offline
+      [ ] App works offline (except AI)
+      [ ] AI disabled offline, re-enabled online
+      [ ] Take final screenshots for documentation
+
+      Full E2E Workflow (use @dev-browser):
+      [ ] New → Template → Edit → AI → Save → Export → Reload → Load
+      [ ] Offline editing and saving works
+      [ ] Complete user journey successful
 
       If ANY check fails:
       1. Identify the failing component
@@ -367,5 +523,11 @@ do:
 # - Async font loading with IndexedDB cache
 # - PWA manifest and installable
 # - Offline indicator and graceful degradation
-# - All tests pass, zero warnings
-# - Full manual verification passes
+# - All unit tests pass, zero warnings
+# - All @dev-browser tests pass:
+#   - File operations
+#   - PDF export
+#   - PWA/Service worker
+#   - Offline mode
+#   - Full E2E workflow
+# - Project ready for production release

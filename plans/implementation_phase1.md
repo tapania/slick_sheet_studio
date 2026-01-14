@@ -41,12 +41,21 @@ agent render-pipeline:
     Always run @code-simplifier after writing code.
     Run cargo fmt and cargo clippy before finishing.
 
+agent browser-tester:
+  model: opus
+  prompt: |
+    You are a browser automation testing specialist.
+    You use @dev-browser to verify UI behavior in real browsers.
+    You test user interactions and visual rendering.
+    Always run @code-simplifier after writing code.
+
 agent verifier:
   model: opus
   prompt: |
     You are a strict build and test verifier.
     You ensure all tests pass, clippy has zero warnings,
     code is formatted, and the app runs correctly.
+    Use @dev-browser for browser verification.
     Loop until ALL requirements are satisfied.
 
 # =============================================================================
@@ -68,6 +77,17 @@ block lint-pass:
     prompt: "Run cargo fmt --check, fix any formatting issues"
   session: current-agent
     prompt: "Run cargo clippy -- -D warnings, fix all warnings"
+
+block browser-test:
+  session: browser-tester
+    prompt: |
+      Use @dev-browser to test the running application:
+      1. Navigate to http://localhost:8080
+      2. Wait for WASM to load
+      3. Verify page elements are present
+      4. Take screenshot for verification
+  session: browser-tester
+    prompt: "Perform interaction tests and validate results"
 
 # =============================================================================
 # Phase 1 Workflow
@@ -180,20 +200,48 @@ let integration = do:
 
   do lint-pass
 
-# Step 5: Final Verification (strict)
+# Step 5: Browser Testing
+let browser-tests = do:
+  session browser-tester:
+    prompt: |
+      Start trunk serve in background, then use @dev-browser to test:
+
+      Test Scenarios:
+      1. Navigate to http://localhost:8080
+      2. Wait for page load and WASM initialization
+      3. Verify textarea is present and editable
+      4. Verify SVG output container exists
+      5. Type "Hello World" into textarea
+      6. Verify SVG output updates with rendered text
+      7. Type invalid Typst syntax
+      8. Verify error message is displayed
+      9. Take screenshot of working state
+
+      Use @dev-browser for all browser interactions.
+      Loop until all browser tests pass.
+
+  do browser-test
+
+# Step 6: Final Verification (strict)
 do:
   session verifier:
     prompt: |
       Verify Phase 1 is COMPLETE:
 
-      Checklist:
+      Automated Checks:
       [ ] cargo fmt --check passes
       [ ] cargo clippy -- -D warnings passes
       [ ] cargo test passes (all tests green)
       [ ] wasm-pack build compiles
       [ ] trunk serve runs without errors
+
+      Browser Verification (use @dev-browser):
+      [ ] Navigate to http://localhost:8080
       [ ] Typing in textarea updates SVG preview
       [ ] "Hello World" renders correctly
+      [ ] Error handling works for invalid syntax
+      [ ] Take final screenshot for documentation
+
       [ ] Snapshot tests match baselines
 
       If ANY check fails:
@@ -214,4 +262,5 @@ do:
 # - All snapshot tests pass
 # - Zero clippy warnings
 # - Code is formatted
+# - @dev-browser tests confirm working UI
 # - trunk serve shows working "Hello World" → SVG

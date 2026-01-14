@@ -2,6 +2,34 @@
 # Goal: Enable AI-driven layout generation with visual verification loop
 
 # =============================================================================
+# Configuration
+# =============================================================================
+
+# Testing Configuration:
+# - Use .env.testing for API key: OPENROUTER_API_KEY=sk-or-...
+# - Load with: source .env.testing before running integration tests
+#
+# Cost-Optimized Test Models (OpenRouter IDs):
+# - google/gemini-3-flash       (cheapest, fast, good for iteration)
+# - anthropic/claude-4.5-haiku  (fast, good quality)
+# - openai/gpt-5.2-mini         (balanced cost/quality)
+#
+# Production Models (for actual use):
+# - anthropic/claude-sonnet-4   (best quality)
+# - google/gemini-2-pro         (vision capable)
+# - openai/gpt-5                (alternative)
+
+env:
+  testing:
+    file: .env.testing
+    vars:
+      - OPENROUTER_API_KEY
+    models:
+      default: google/gemini-3-flash
+      vision: google/gemini-3-flash  # supports vision
+      fallback: anthropic/claude-4.5-haiku
+
+# =============================================================================
 # Agent Definitions
 # =============================================================================
 
@@ -50,12 +78,34 @@ agent ui-builder:
     Always run @code-simplifier after writing code.
     Run cargo fmt and cargo clippy before finishing.
 
+agent browser-tester:
+  model: opus
+  prompt: |
+    You are a browser automation testing specialist.
+    You use @dev-browser to verify UI behavior in real browsers.
+    You test AI interactions and verify agent loop behavior.
+    Always run @code-simplifier after writing code.
+
+agent integration-tester:
+  model: opus
+  prompt: |
+    You are an API integration testing specialist.
+    You test real API calls using .env.testing credentials.
+    You use cost-optimized models for testing:
+    - google/gemini-3-flash (default)
+    - anthropic/claude-4.5-haiku (fallback)
+    - openai/gpt-5.2-mini (alternative)
+    Use @dev-browser for browser-based integration tests.
+    Always run @code-simplifier after writing code.
+
 agent verifier:
   model: opus
   prompt: |
     You are a strict build and test verifier.
     You ensure all tests pass, clippy has zero warnings,
     code is formatted, and the agent loop works correctly.
+    Use @dev-browser for browser verification.
+    Use .env.testing for API integration tests.
     Loop until ALL requirements are satisfied.
 
 # =============================================================================
@@ -78,9 +128,59 @@ block lint-pass:
   session: current-agent
     prompt: "Run cargo clippy -- -D warnings, fix all warnings"
 
+block browser-test:
+  session: browser-tester
+    prompt: |
+      Use @dev-browser to test the running application:
+      1. Navigate to http://localhost:8080
+      2. Wait for WASM to load
+      3. Verify page elements are present
+      4. Take screenshot for verification
+  session: browser-tester
+    prompt: "Perform interaction tests and validate results"
+
+block api-integration-test:
+  session: integration-tester
+    prompt: |
+      Load API key from .env.testing:
+      source .env.testing
+
+      Run integration tests with cost-optimized models:
+      - Use google/gemini-3-flash for speed/cost
+      - Verify API connectivity
+      - Test basic completion
+      - Test vision capability
+  session: integration-tester
+    prompt: "Verify all API integrations work with real credentials"
+
 # =============================================================================
 # Phase 3 Workflow
 # =============================================================================
+
+# Step 0: Create .env.testing template
+let env-setup = do:
+  session api-client-builder:
+    prompt: |
+      Create .env.testing.template file:
+
+      ```
+      # OpenRouter API Configuration for Testing
+      # Copy to .env.testing and add your key
+      # Get key from: https://openrouter.ai/keys
+
+      OPENROUTER_API_KEY=sk-or-your-key-here
+
+      # Cost-optimized test models (OpenRouter model IDs)
+      TEST_MODEL_DEFAULT=google/gemini-3-flash
+      TEST_MODEL_VISION=google/gemini-3-flash
+      TEST_MODEL_FALLBACK=anthropic/claude-4.5-haiku
+      TEST_MODEL_ALT=openai/gpt-5.2-mini
+      ```
+
+      Add .env.testing to .gitignore (keep secrets out of repo).
+      Add .env.testing.template to git (document the required vars).
+
+  do lint-pass
 
 # Step 1: OpenRouter API Client
 let api-client = do:
@@ -95,6 +195,15 @@ let api-client = do:
       4. Test: parse_response() returns error for invalid JSON
       5. Test: parse_response() handles rate limit errors
       6. Test: supports_vision() returns true for vision models
+      7. Test: model_id mapping works for all supported models
+
+      Supported Models (OpenRouter IDs):
+      - google/gemini-3-flash       (test default, vision capable)
+      - anthropic/claude-4.5-haiku  (test fallback)
+      - openai/gpt-5.2-mini         (test alternative)
+      - anthropic/claude-sonnet-4   (production)
+      - google/gemini-2-pro         (production vision)
+      - openai/gpt-5                (production alternative)
 
       OpenRouterClient struct:
       - api_key: String
@@ -104,6 +213,7 @@ let api-client = do:
       Methods:
       - async complete(messages: Vec<Message>) -> Result<String, ApiError>
       - async complete_with_image(messages: Vec<Message>, image_base64: &str) -> Result<String, ApiError>
+      - fn supports_vision(&self) -> bool
 
       Message struct:
       - role: Role (System, User, Assistant)
@@ -127,14 +237,20 @@ parallel-do:
         Create src/ai/prompts.rs with model-specific prompts:
 
         TDD Requirements (write tests FIRST):
-        1. Test: get_system_prompt(Model::Claude) returns Claude-optimized prompt
-        2. Test: get_system_prompt(Model::GPT4) returns GPT4-optimized prompt
-        3. Test: get_system_prompt(Model::Gemini) returns Gemini-optimized prompt
+        1. Test: get_system_prompt(Model::GeminiFlash) returns Gemini-optimized prompt
+        2. Test: get_system_prompt(Model::ClaudeHaiku) returns Claude-optimized prompt
+        3. Test: get_system_prompt(Model::GPTMini) returns GPT-optimized prompt
         4. Test: build_generation_prompt includes current code
         5. Test: build_verification_prompt includes user intent
         6. Test: build_error_recovery_prompt includes error details
 
-        Model enum: Claude, GPT4, Gemini
+        Model enum with OpenRouter IDs:
+        - GeminiFlash    = "google/gemini-3-flash"
+        - ClaudeHaiku    = "anthropic/claude-4.5-haiku"
+        - GPTMini        = "openai/gpt-5.2-mini"
+        - ClaudeSonnet   = "anthropic/claude-sonnet-4"
+        - GeminiPro      = "google/gemini-2-pro"
+        - GPT5           = "openai/gpt-5"
 
         Prompt templates should:
         - Instruct model to output ONLY valid Typst code
@@ -174,6 +290,10 @@ parallel-do:
             new_svg: &str,
             user_intent: &str,
           ) -> Result<VerificationResult, ApiError>
+
+        Use vision-capable models for verification:
+        - google/gemini-3-flash (test - supports vision)
+        - google/gemini-2-pro (production)
 
         For SVG→PNG: use web_sys canvas API in WASM.
         For tests: mock the canvas rendering.
@@ -254,7 +374,12 @@ let settings-ui = do:
       Requirements:
       1. Modal for AI configuration
       2. API key input (password field)
-      3. Model selector dropdown (Claude/GPT4/Gemini)
+      3. Model selector dropdown with options:
+         - Gemini 3 Flash (Fast & Cheap) - google/gemini-3-flash
+         - Claude 4.5 Haiku (Balanced) - anthropic/claude-4.5-haiku
+         - GPT-5.2 Mini (Alternative) - openai/gpt-5.2-mini
+         - Claude Sonnet 4 (Best Quality) - anthropic/claude-sonnet-4
+         - Gemini 2 Pro (Vision) - google/gemini-2-pro
       4. Max iterations slider (1-10, default 5)
       5. Save to localStorage
       6. Load from localStorage on init
@@ -312,13 +437,91 @@ let integration = do:
 
   do lint-pass
 
-# Step 7: Final Verification
+# Step 7: Browser Testing (UI)
+let browser-ui-tests = do:
+  session browser-tester:
+    prompt: |
+      Start trunk serve in background, then use @dev-browser to test:
+
+      UI Test Scenarios:
+      1. Navigate to http://localhost:8080
+      2. Click settings button
+      3. Verify settings modal opens
+      4. Enter API key in password field
+      5. Select model from dropdown
+      6. Adjust max iterations slider
+      7. Click Save, verify modal closes
+      8. Reopen settings, verify values persisted
+      9. Verify chat panel is visible
+      10. Type prompt in chat input
+      11. Verify send button is enabled
+      12. Take screenshots at each step
+
+      Use @dev-browser for all browser interactions.
+      Loop until all UI tests pass.
+
+  do browser-test
+
+# Step 8: API Integration Testing
+let api-tests = do:
+  session integration-tester:
+    prompt: |
+      Run real API integration tests using .env.testing:
+
+      Setup:
+      1. Ensure .env.testing exists with OPENROUTER_API_KEY
+      2. source .env.testing to load environment
+
+      Integration Test Scenarios (use google/gemini-3-flash for cost):
+      1. Test basic text completion
+         - Send simple prompt
+         - Verify response received
+         - Check response format
+
+      2. Test vision capability
+         - Create simple SVG
+         - Convert to PNG/base64
+         - Send to vision model
+         - Verify image analysis response
+
+      3. Test Typst code generation
+         - Send "Create a hello world document"
+         - Verify valid Typst code returned
+         - Compile with VirtualWorld
+         - Verify compilation succeeds
+
+      4. Test error recovery
+         - Send prompt that generates invalid Typst
+         - Verify agent retries with error context
+         - Check retry limit respected
+
+      Use @dev-browser to test full agent loop in browser:
+      1. Navigate to http://localhost:8080
+      2. Configure API key in settings
+      3. Select google/gemini-3-flash model
+      4. Type "Make the title red" in chat
+      5. Observe agent loop progress
+      6. Verify Typst code updates
+      7. Verify preview reflects change
+      8. Take screenshot of final result
+
+      Loop until all integration tests pass.
+
+  do api-integration-test
+  do browser-test
+
+# Step 9: Final Verification
 do:
   session verifier:
     prompt: |
       Verify Phase 3 is COMPLETE:
 
-      Checklist:
+      Environment Setup:
+      [ ] .env.testing.template exists in repo
+      [ ] .env.testing is in .gitignore
+      [ ] .env.testing exists locally with valid API key
+
+      Automated Checks:
       [ ] cargo fmt --check passes
       [ ] cargo clippy -- -D warnings passes
       [ ] cargo test passes (all tests green)
@@ -327,15 +530,25 @@ do:
       [ ] Vision verification tests pass (mocked)
       [ ] Agent state machine tests pass
       [ ] trunk serve runs without errors
-      [ ] Settings modal saves/loads API key
+
+      Browser Verification (use @dev-browser):
+      [ ] Navigate to http://localhost:8080
+      [ ] Settings modal opens and saves correctly
       [ ] Chat panel accepts prompts
-      [ ] Agent loop executes (with real API key):
+      [ ] Model selector shows all options
+
+      API Integration (use .env.testing with google/gemini-3-flash):
+      [ ] source .env.testing loads API key
+      [ ] Basic completion works
+      [ ] Vision analysis works
+      [ ] Agent loop executes:
           - Generates code
           - Compiles
           - Verifies with vision
           - Retries on failure
           - Completes or fails gracefully
       [ ] "Make the title red" works end-to-end
+      [ ] Take final screenshot for documentation
 
       If ANY check fails:
       1. Identify the failing component
@@ -351,6 +564,7 @@ do:
 # =============================================================================
 
 # Phase 3 is complete when:
+# - .env.testing configured with API key
 # - OpenRouter client working (all models)
 # - Model-specific prompt templates
 # - Visual verification with vision LLM
@@ -358,5 +572,6 @@ do:
 # - Settings modal with localStorage persistence
 # - Chat interface for user interaction
 # - Full agent loop: generate → compile → verify → retry/complete
-# - All tests pass with mocked external calls
-# - Manual verification with real API key works
+# - All unit tests pass with mocked external calls
+# - All integration tests pass with real API (google/gemini-3-flash)
+# - @dev-browser tests confirm all UI and API interactions work

@@ -41,12 +41,21 @@ agent link-interceptor:
     Always run @code-simplifier after writing code.
     Run cargo fmt and cargo clippy before finishing.
 
+agent browser-tester:
+  model: opus
+  prompt: |
+    You are a browser automation testing specialist.
+    You use @dev-browser to verify UI behavior in real browsers.
+    You test user interactions, click events, and modal dialogs.
+    Always run @code-simplifier after writing code.
+
 agent verifier:
   model: opus
   prompt: |
     You are a strict build and test verifier.
     You ensure all tests pass, clippy has zero warnings,
     code is formatted, and features work correctly.
+    Use @dev-browser for browser verification.
     Loop until ALL requirements are satisfied.
 
 # =============================================================================
@@ -68,6 +77,17 @@ block lint-pass:
     prompt: "Run cargo fmt --check, fix any formatting issues"
   session: current-agent
     prompt: "Run cargo clippy -- -D warnings, fix all warnings"
+
+block browser-test:
+  session: browser-tester
+    prompt: |
+      Use @dev-browser to test the running application:
+      1. Navigate to http://localhost:8080
+      2. Wait for WASM to load
+      3. Verify page elements are present
+      4. Take screenshot for verification
+  session: browser-tester
+    prompt: "Perform interaction tests and validate results"
 
 # =============================================================================
 # Phase 2 Workflow
@@ -269,13 +289,41 @@ let integration = do:
 
   do lint-pass
 
-# Step 7: Final Verification
+# Step 7: Browser Testing
+let browser-tests = do:
+  session browser-tester:
+    prompt: |
+      Start trunk serve in background, then use @dev-browser to test:
+
+      Test Scenarios:
+      1. Navigate to http://localhost:8080
+      2. Verify split pane layout is visible (code left, preview right)
+      3. Type Typst code in left pane
+      4. Verify preview updates after debounce delay
+      5. Toggle auto-preview off
+      6. Verify typing no longer auto-updates preview
+      7. Click manual refresh button
+      8. Verify preview updates
+      9. Click on editable text in preview (cmd:// link)
+      10. Verify edit modal opens
+      11. Modify text in modal, click Save
+      12. Verify preview reflects the change
+      13. Click Cancel in modal
+      14. Verify no changes applied
+      15. Take screenshots at each major step
+
+      Use @dev-browser for all browser interactions.
+      Loop until all browser tests pass.
+
+  do browser-test
+
+# Step 8: Final Verification
 do:
   session verifier:
     prompt: |
       Verify Phase 2 is COMPLETE:
 
-      Checklist:
+      Automated Checks:
       [ ] cargo fmt --check passes
       [ ] cargo clippy -- -D warnings passes
       [ ] cargo test passes (all tests green)
@@ -283,11 +331,16 @@ do:
       [ ] Signal state tests pass
       [ ] Link parsing tests pass
       [ ] trunk serve runs without errors
+
+      Browser Verification (use @dev-browser):
+      [ ] Navigate to http://localhost:8080
       [ ] Split pane editor displays correctly
       [ ] Typing in code pane updates preview (debounced)
+      [ ] Auto/manual preview toggle works
       [ ] Clicking text in SVG opens edit modal
       [ ] Editing in modal updates preview
-      [ ] Auto/manual preview toggle works
+      [ ] Modal Save/Cancel work correctly
+      [ ] Take final screenshot for documentation
 
       If ANY check fails:
       1. Identify the failing component
@@ -309,3 +362,4 @@ do:
 # - Edit modal opens on click, saves changes
 # - Debounced auto-preview OR manual refresh
 # - All tests pass, zero warnings
+# - @dev-browser tests confirm all UI interactions work
