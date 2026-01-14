@@ -1,0 +1,41 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# WASM build artifacts
+/dist/
+/pkg/
+*.wasm
+*.wasm.map
+
+# Trunk (Leptos build tool)
+.trunk/
+
+# wasm-pack
+/wasm-pack-out/
+
+# Node (if using npm for tooling)
+node_modules/
+package-lock.json
+yarn.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+*.local
+
+# Debug
+*.log
+debug/
