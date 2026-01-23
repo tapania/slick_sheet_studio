@@ -34,8 +34,13 @@ Thumbs.db
 # Environment
 .env
 .env.local
+.env.testing
 *.local
 
 # Debug
 *.log
 debug/
+tmp/
+
+# Claude Code
+.claude/
